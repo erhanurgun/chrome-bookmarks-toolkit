@@ -63,60 +63,106 @@
   const BAR_TITLES = ['Bookmarks bar', 'Yer işareti çubuğu', 'Barre de favoris', 'Lesezeichenleiste'];
   // ================================
 
-  const api = {
-    getTree: () => new Promise(r => chrome.bookmarks.getTree(r)),
-    remove: (id) => new Promise((ok, fail) => chrome.bookmarks.remove(id, () => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok();
-    })),
-  };
-  const log = (...a) => console.log('[ephemeral]', ...a);
-  const warn = (...a) => console.warn('[ephemeral]', ...a);
+  // ======== CONSTANTS ========
+  // Kaç silme başında bir ilerleme satırı yazılsın (sadece büyük ağaçlar için anlamlı).
+  const PROGRESS_EVERY = 100;
+  // ================================
 
-  const classify = (url) => {
-    for (const [name, re] of PATTERNS) if (re.test(url)) return name;
+  // ======== HELPERS ========
+  const makeLogger = (prefix) => ({
+    log: (...args) => console.log(`[${prefix}]`, ...args),
+    warn: (...args) => console.warn(`[${prefix}]`, ...args),
+    error: (...args) => console.error(`[${prefix}]`, ...args),
+  });
+
+  const makeApi = () => ({
+    getTree: () => new Promise((resolve) => chrome.bookmarks.getTree(resolve)),
+    remove: (id) => new Promise((resolve, reject) => chrome.bookmarks.remove(id, () => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve();
+    })),
+  });
+
+  const findBar = async (api, barTitles) => {
+    const tree = await api.getTree();
+    return tree[0].children.find((c) => c.id === '1' || barTitles.includes(c.title)) || null;
+  };
+
+  // Bar'ın kendi başlığı path'e dahil edilmez: kök klasörler path'in başlangıcıdır.
+  const collectBookmarks = (bar) => {
+    const all = [];
+    const walk = (node, path) => {
+      if (node.url) {
+        all.push({ id: node.id, url: node.url, title: node.title || '', path });
+        return;
+      }
+      const childPath = path ? path + '/' + node.title : node.title;
+      for (const c of (node.children || [])) walk(c, childPath);
+    };
+    for (const c of (bar.children || [])) walk(c, '');
+    return all;
+  };
+
+  // İlk eşleşen pattern etiketi veya null.
+  const classifyUrl = (url, patterns) => {
+    for (const [name, re] of patterns) if (re.test(url)) return name;
     return null;
   };
 
-  const tree = await api.getTree();
-  const bar = tree[0].children.find(c => c.id === '1' || BAR_TITLES.includes(c.title));
-  if (!bar) { console.error('[ephemeral] Yer imleri çubuğu bulunamadı'); return; }
-
-  const all = [];
-  const walk = (node, path = '') => {
-    if (node.url) { all.push({ id: node.id, url: node.url, title: node.title || '', path }); return; }
-    const t = (node.id === bar.id) ? '' : node.title;
-    const mp = t ? (path ? path + '/' + t : t) : path;
-    for (const c of (node.children || [])) walk(c, mp);
-  };
-  walk(bar);
-
-  const matched = [];
-  const byCategory = new Map();
-  for (const b of all) {
-    const cat = classify(b.url);
-    if (cat) {
+  const matchAgainstPatterns = (bookmarks, patterns) => {
+    const matched = [];
+    const byCategory = new Map();
+    for (const b of bookmarks) {
+      const cat = classifyUrl(b.url, patterns);
+      if (!cat) continue;
       matched.push({ ...b, category: cat });
       if (!byCategory.has(cat)) byCategory.set(cat, []);
       byCategory.get(cat).push(b);
     }
-  }
+    return { matched, byCategory };
+  };
 
-  log(`======== ANALİZ (DRY_RUN=${DRY_RUN}) ========`);
-  log(`Toplam ${all.length} URL tarandı, ${matched.length} eşleşme`);
-  log('');
-  const sorted = [...byCategory.entries()].sort((a, b) => b[1].length - a[1].length);
-  for (const [cat, items] of sorted) log(`  ${String(items.length).padStart(4)}  ${cat}`);
+  const printCategoryReport = (total, matched, byCategory, showPerCategory, dryRun, log) => {
+    log(`======== ANALİZ (DRY_RUN=${dryRun}) ========`);
+    log(`Toplam ${total} URL tarandı, ${matched.length} eşleşme`);
+    log('');
+    const sorted = [...byCategory.entries()].sort((a, b) => b[1].length - a[1].length);
+    for (const [cat, items] of sorted) log(`  ${String(items.length).padStart(4)}  ${cat}`);
 
-  log('');
-  log('======== KATEGORİ BAZLI ÖRNEKLER ========');
-  for (const [cat, items] of sorted) {
-    log(`\n[${cat}]  (${items.length} adet)`);
-    for (const b of items.slice(0, SHOW_PER_CATEGORY)) {
-      log(`  ${b.path || '(kök)'} / ${b.title.slice(0, 60) || '(başlıksız)'}`);
-      log(`     ${b.url.slice(0, 100)}`);
+    log('');
+    log('======== KATEGORİ BAZLI ÖRNEKLER ========');
+    for (const [cat, items] of sorted) {
+      log(`\n[${cat}]  (${items.length} adet)`);
+      for (const b of items.slice(0, showPerCategory)) {
+        log(`  ${b.path || '(kök)'} / ${b.title.slice(0, 60) || '(başlıksız)'}`);
+        log(`     ${b.url.slice(0, 100)}`);
+      }
+      if (items.length > showPerCategory) log(`  ... ve ${items.length - showPerCategory} daha`);
     }
-    if (items.length > SHOW_PER_CATEGORY) log(`  ... ve ${items.length - SHOW_PER_CATEGORY} daha`);
-  }
+  };
+
+  // Progress log'u PROGRESS_EVERY adımda bir; büyük ağaçlarda ilerleme görünür.
+  const applyDeletes = async (matched, api, log, warn, progressEvery) => {
+    let deleted = 0, errors = 0;
+    for (const b of matched) {
+      try {
+        await api.remove(b.id);
+        deleted++;
+        if (deleted % progressEvery === 0) log(`  ilerleme: ${deleted}/${matched.length}`);
+      } catch (e) { warn('remove fail:', b.url, e); errors++; }
+    }
+    return { deleted, errors };
+  };
+
+  // ======== MAIN ========
+  const { log, warn } = makeLogger('ephemeral');
+  const api = makeApi();
+
+  const bar = await findBar(api, BAR_TITLES);
+  if (!bar) { console.error('[ephemeral] Yer imleri çubuğu bulunamadı'); return; }
+
+  const all = collectBookmarks(bar);
+  const { matched, byCategory } = matchAgainstPatterns(all, PATTERNS);
+  printCategoryReport(all.length, matched, byCategory, SHOW_PER_CATEGORY, DRY_RUN, log);
 
   if (DRY_RUN) {
     log('');
@@ -124,12 +170,9 @@
     return { total: matched.length };
   }
 
-  let deleted = 0, errors = 0;
-  for (const b of matched) {
-    try { await api.remove(b.id); deleted++;
-      if (deleted % 100 === 0) log(`  ilerleme: ${deleted}/${matched.length}`);
-    } catch (e) { warn('remove fail:', b.url, e); errors++; }
-  }
+  const { deleted, errors } = await applyDeletes(matched, api, log, warn, PROGRESS_EVERY);
+
+  // ======== SUMMARY ========
   log('');
   log('======== ÖZET ========');
   log(`Silinen: ${deleted}`);
