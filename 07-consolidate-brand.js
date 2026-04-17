@@ -30,6 +30,7 @@
   const MIN_GROUP = 3;                 // minimum URL sayısı
   const MIN_FOLDERS = 2;               // minimum farklı klasör sayısı
   const MIN_BRAND_LEN = 3;
+  const MAX_BRAND_LEN = 30;
   const PREFIX_SEPARATORS = [' | ', ' - ', ' — ', ' – '];
   // Özel marka kuralları: registrable domain → hedef klasör path (boş = otomatik)
   const USER_PRIORITY_MAP = {
@@ -46,28 +47,30 @@
   const BAR_TITLES = ['Bookmarks bar', 'Yer işareti çubuğu', 'Barre de favoris', 'Lesezeichenleiste'];
   // ================================
 
-  const api = {
-    getTree: () => new Promise(r => chrome.bookmarks.getTree(r)),
-    getChildren: (id) => new Promise(r => chrome.bookmarks.getChildren(id, r)),
-    create: (det) => new Promise((ok, fail) => chrome.bookmarks.create(det, (n) => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok(n);
-    })),
-    move: (id, dest) => new Promise((ok, fail) => chrome.bookmarks.move(id, dest, (n) => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok(n);
-    })),
-    removeTree: (id) => new Promise((ok, fail) => chrome.bookmarks.removeTree(id, () => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok();
-    })),
-  };
-  const log = (...a) => console.log('[brand]', ...a);
-  const warn = (...a) => console.warn('[brand]', ...a);
+  // ======== HELPERS ========
+  const makeLogger = (prefix) => ({
+    log: (...args) => console.log(`[${prefix}]`, ...args),
+    warn: (...args) => console.warn(`[${prefix}]`, ...args),
+    error: (...args) => console.error(`[${prefix}]`, ...args),
+  });
 
-  const getRegistrable = (hostname) => {
-    const parts = hostname.toLowerCase().split('.').filter(Boolean);
-    if (parts.length < 2) return hostname.toLowerCase();
-    const lastTwo = parts.slice(-2).join('.');
-    if (COMMON_SLDS.has(lastTwo) && parts.length >= 3) return parts.slice(-3).join('.');
-    return lastTwo;
+  const makeApi = () => ({
+    getTree: () => new Promise((resolve) => chrome.bookmarks.getTree(resolve)),
+    getChildren: (id) => new Promise((resolve) => chrome.bookmarks.getChildren(id, resolve)),
+    create: (details) => new Promise((resolve, reject) => chrome.bookmarks.create(details, (node) => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve(node);
+    })),
+    move: (id, dest) => new Promise((resolve, reject) => chrome.bookmarks.move(id, dest, (node) => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve(node);
+    })),
+    removeTree: (id) => new Promise((resolve, reject) => chrome.bookmarks.removeTree(id, () => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve();
+    })),
+  });
+
+  const findBar = async (api, barTitles) => {
+    const tree = await api.getTree();
+    return tree[0].children.find((c) => c.id === '1' || barTitles.includes(c.title)) || null;
   };
 
   const getHost = (url) => {
@@ -78,69 +81,89 @@
     } catch { return ''; }
   };
 
-  const extractPrefix = (title) => {
+  // eTLD+1 hesabı: iki seviyeli TLD'ler commonSlds ile tanımlı (örn. com.tr).
+  const getRegistrable = (hostname, commonSlds) => {
+    const parts = hostname.toLowerCase().split('.').filter(Boolean);
+    if (parts.length < 2) return hostname.toLowerCase();
+    const lastTwo = parts.slice(-2).join('.');
+    if (commonSlds.has(lastTwo) && parts.length >= 3) return parts.slice(-3).join('.');
+    return lastTwo;
+  };
+
+  // Başlıkta marka prefix'i: "Google | X" → "Google". Ayraçlar ve uzunluk
+  // eşikleri dışarıdan gelir (farklı ayar için tekrar yazılmadan kullanılabilir).
+  const extractPrefix = (title, separators, minLen, maxLen) => {
     if (!title) return null;
-    for (const sep of PREFIX_SEPARATORS) {
+    for (const sep of separators) {
       const idx = title.indexOf(sep);
-      if (idx >= MIN_BRAND_LEN) {
+      if (idx >= minLen) {
         const prefix = title.slice(0, idx).trim();
-        if (prefix.length >= MIN_BRAND_LEN && prefix.length <= 30) return prefix;
+        if (prefix.length >= minLen && prefix.length <= maxLen) return prefix;
       }
     }
     return null;
   };
 
-  const tree = await api.getTree();
-  const bar = tree[0].children.find(c => c.id === '1' || BAR_TITLES.includes(c.title));
-  if (!bar) { console.error('[brand] Yer imleri çubuğu bulunamadı'); return; }
-
-  // Tüm URL'leri path bilgili düz listeye çıkar
-  const all = [];
-  const walk = (node, path = '') => {
-    if (node.url) { all.push({ id: node.id, title: node.title || '', url: node.url, path, parentId: node.parentId }); return; }
-    const t = (node.id === bar.id) ? '' : node.title;
-    const mp = t ? (path ? path + '/' + t : t) : path;
-    for (const c of (node.children || [])) walk(c, mp);
+  // Bar çocuklarından başlar (bar'ın kendi title'ı path'e dahil edilmez).
+  // Her URL için path + parentId saklanır; consolidation için gerekli.
+  const collectBookmarks = (bar) => {
+    const all = [];
+    const walk = (node, path) => {
+      if (node.url) {
+        all.push({ id: node.id, title: node.title || '', url: node.url, path, parentId: node.parentId });
+        return;
+      }
+      const childPath = path ? path + '/' + node.title : node.title;
+      for (const c of (node.children || [])) walk(c, childPath);
+    };
+    for (const c of (bar.children || [])) walk(c, '');
+    return all;
   };
-  walk(bar);
 
-  const rootKids = await api.getChildren(bar.id);
-  const rootFolders = rootKids.filter(k => !k.url);
+  // Her URL için önce prefix, yoksa registrable domain'in ilk parçasıyla
+  // marka key'i üretir; aynı key'de toplanan URL'ler grup oluşturur.
+  const buildBrandMap = (bookmarks, config) => {
+    const { prefixSeparators, minBrandLen, maxBrandLen, commonSlds } = config;
+    const brandMap = new Map();
 
-  // Marka haritası: key (lowercase) → { prefixName, regDomain, items, viaPrefix, viaDomain }
-  const brandMap = new Map();
-  for (const it of all) {
-    const p = extractPrefix(it.title);
-    const h = getHost(it.url);
-    const reg = h ? getRegistrable(h) : '';
-    const domainFirst = reg ? reg.split('.')[0] : '';
+    const ensureEntry = (key, init) => {
+      if (!brandMap.has(key)) brandMap.set(key, init);
+      return brandMap.get(key);
+    };
 
-    if (p) {
-      const key = p.toLocaleLowerCase();
-      if (!brandMap.has(key)) brandMap.set(key, { prefixName: p, regDomain: reg, items: [], viaPrefix: 0, viaDomain: 0 });
-      const e = brandMap.get(key);
-      e.items.push(it); e.viaPrefix++;
-      if (!e.regDomain && reg) e.regDomain = reg;
-    } else if (domainFirst) {
-      const key = domainFirst.toLowerCase();
-      if (!brandMap.has(key)) brandMap.set(key, { prefixName: null, regDomain: reg, items: [], viaPrefix: 0, viaDomain: 0 });
-      const e = brandMap.get(key);
-      e.items.push(it); e.viaDomain++;
-      if (!e.regDomain) e.regDomain = reg;
+    for (const it of bookmarks) {
+      const prefix = extractPrefix(it.title, prefixSeparators, minBrandLen, maxBrandLen);
+      const host = getHost(it.url);
+      const reg = host ? getRegistrable(host, commonSlds) : '';
+      const domainFirst = reg ? reg.split('.')[0] : '';
+
+      if (prefix) {
+        const entry = ensureEntry(prefix.toLocaleLowerCase(), { prefixName: prefix, regDomain: reg, items: [], viaPrefix: 0, viaDomain: 0 });
+        entry.items.push(it);
+        entry.viaPrefix++;
+        if (!entry.regDomain && reg) entry.regDomain = reg;
+      } else if (domainFirst) {
+        const entry = ensureEntry(domainFirst.toLowerCase(), { prefixName: null, regDomain: reg, items: [], viaPrefix: 0, viaDomain: 0 });
+        entry.items.push(it);
+        entry.viaDomain++;
+        if (!entry.regDomain) entry.regDomain = reg;
+      }
     }
-  }
+    return brandMap;
+  };
 
-  const pickCanonical = (entry) => {
-    // (0) Kullanıcı zorlu kural
-    if (entry.regDomain && USER_PRIORITY_MAP[entry.regDomain]) return USER_PRIORITY_MAP[entry.regDomain];
-    // (1) Prefix'li marka: kök klasör başlangıç eşleşmesi
+  // Hedef konum seçimi üç öncelikle: (0) user map, (1) prefix'le eşleşen kök,
+  // (2) en sık bulunduğu kök kategori + marka alt klasörü.
+  const pickCanonical = (entry, rootFolders, userPriorityMap) => {
+    if (entry.regDomain && userPriorityMap[entry.regDomain]) return userPriorityMap[entry.regDomain];
+
     if (entry.prefixName) {
       const lb = entry.prefixName.toLocaleLowerCase();
       for (const rf of rootFolders) {
         if (rf.title.toLocaleLowerCase().startsWith(lb)) return rf.title;
       }
     }
-    // (2) En sık kök kategori altında marka alt klasörü
+
     const brandDisplay = entry.prefixName ? entry.prefixName : `*.${entry.regDomain}`;
     const rootCount = new Map();
     for (const i of entry.items) {
@@ -152,27 +175,117 @@
     return brandDisplay;
   };
 
-  const fragmented = [];
-  for (const [key, entry] of brandMap) {
-    if (entry.items.length < MIN_GROUP) continue;
-    const folders = new Set(entry.items.map(i => i.path));
-    if (folders.size < MIN_FOLDERS) continue;
-    const brand = entry.prefixName ? entry.prefixName : `*.${entry.regDomain}`;
-    fragmented.push({ brand, items: entry.items, folders: [...folders], canonical: pickCanonical(entry), viaPrefix: entry.viaPrefix, viaDomain: entry.viaDomain });
-  }
-
-  log(`======== ANALİZ (DRY_RUN=${DRY_RUN}) ========`);
-  log(`Parçalanmış marka sayısı: ${fragmented.length}`);
-  fragmented.sort((a, b) => b.items.length - a.items.length);
-  for (const f of fragmented) {
-    log(`\n[${f.brand}]  (${f.items.length} öğe: ${f.viaPrefix} prefix + ${f.viaDomain} domain, ${f.folders.length} farklı klasörde)`);
-    const byPath = {};
-    for (const i of f.items) byPath[i.path] = (byPath[i.path] || 0) + 1;
-    for (const [p, n] of Object.entries(byPath).sort((a, b) => b[1] - a[1])) {
-      log(`    ${String(n).padStart(3)}  ${p || '(kök)'}`);
+  // Eşikten (MIN_GROUP + MIN_FOLDERS) geçenleri seçer; tek klasöre sıkışmış
+  // markalar zaten toplu olduğu için liste dışıdır.
+  const findFragmented = (brandMap, config) => {
+    const fragmented = [];
+    for (const [, entry] of brandMap) {
+      if (entry.items.length < config.minGroup) continue;
+      const folders = new Set(entry.items.map((i) => i.path));
+      if (folders.size < config.minFolders) continue;
+      const brand = entry.prefixName ? entry.prefixName : `*.${entry.regDomain}`;
+      fragmented.push({
+        brand,
+        items: entry.items,
+        folders: [...folders],
+        canonical: pickCanonical(entry, config.rootFolders, config.userPriorityMap),
+        viaPrefix: entry.viaPrefix,
+        viaDomain: entry.viaDomain,
+      });
     }
-    log(`    → kanonik: ${f.canonical}`);
-  }
+    return fragmented;
+  };
+
+  const printFragmentedReport = (fragmented, dryRun, log) => {
+    log(`======== ANALİZ (DRY_RUN=${dryRun}) ========`);
+    log(`Parçalanmış marka sayısı: ${fragmented.length}`);
+    for (const f of fragmented) {
+      log(`\n[${f.brand}]  (${f.items.length} öğe: ${f.viaPrefix} prefix + ${f.viaDomain} domain, ${f.folders.length} farklı klasörde)`);
+      const byPath = {};
+      for (const i of f.items) byPath[i.path] = (byPath[i.path] || 0) + 1;
+      for (const [p, n] of Object.entries(byPath).sort((a, b) => b[1] - a[1])) {
+        log(`    ${String(n).padStart(3)}  ${p || '(kök)'}`);
+      }
+      log(`    → kanonik: ${f.canonical}`);
+    }
+  };
+
+  // Bar altından başlayarak path zincirini klasörler olarak oluşturur;
+  // yoksa her eksik klasör yaratılır, varsa mevcut kullanılır.
+  const ensurePath = async (barId, pathStr, api, log) => {
+    const parts = pathStr.split('/');
+    let currentId = barId;
+    for (const part of parts) {
+      const kids = await api.getChildren(currentId);
+      let folder = kids.find((k) => !k.url && k.title === part);
+      if (!folder) {
+        folder = await api.create({ parentId: currentId, title: part });
+        log(`  [+] klasör: ${pathStr}`);
+      }
+      currentId = folder.id;
+    }
+    return currentId;
+  };
+
+  const consolidateFragmented = async (fragmented, barId, api, log, warn) => {
+    let moved = 0, inplace = 0, errors = 0;
+    for (const f of fragmented) {
+      try {
+        const targetId = await ensurePath(barId, f.canonical, api, log);
+        for (const item of f.items) {
+          if (item.parentId === targetId) { inplace++; continue; }
+          try { await api.move(item.id, { parentId: targetId }); moved++; }
+          catch (e) { warn('move fail:', item.url, e); errors++; }
+        }
+      } catch (e) {
+        warn('ensurePath fail:', f.canonical, e);
+        errors += f.items.length;
+      }
+    }
+    return { moved, inplace, errors };
+  };
+
+  // Konsolidasyon sonrası boşalan klasörleri siler; kök (bar) ve ilk seviye
+  // ana kategoriler rootIds ile korunur (kullanıcının üst yapısı).
+  const cleanEmptyFolders = async (barId, protectedIds, api) => {
+    const walk = async (folderId) => {
+      const kids = await api.getChildren(folderId);
+      for (const k of kids) if (!k.url) await walk(k.id);
+      const after = await api.getChildren(folderId);
+      if (after.length === 0 && folderId !== barId && !protectedIds.has(folderId)) {
+        try { await api.removeTree(folderId); } catch { /* yoksay, kritik değil */ }
+      }
+    };
+    await walk(barId);
+  };
+
+  // ======== MAIN ========
+  const { log, warn } = makeLogger('brand');
+  const api = makeApi();
+
+  const bar = await findBar(api, BAR_TITLES);
+  if (!bar) { console.error('[brand] Yer imleri çubuğu bulunamadı'); return; }
+
+  const bookmarks = collectBookmarks(bar);
+  const rootKids = await api.getChildren(bar.id);
+  const rootFolders = rootKids.filter((k) => !k.url);
+
+  const config = {
+    prefixSeparators: PREFIX_SEPARATORS,
+    minBrandLen: MIN_BRAND_LEN,
+    maxBrandLen: MAX_BRAND_LEN,
+    commonSlds: COMMON_SLDS,
+    minGroup: MIN_GROUP,
+    minFolders: MIN_FOLDERS,
+    rootFolders,
+    userPriorityMap: USER_PRIORITY_MAP,
+  };
+
+  const brandMap = buildBrandMap(bookmarks, config);
+  const fragmented = findFragmented(brandMap, config);
+  fragmented.sort((a, b) => b.items.length - a.items.length);
+
+  printFragmentedReport(fragmented, DRY_RUN, log);
 
   if (DRY_RUN) {
     log('');
@@ -180,44 +293,13 @@
     return { fragmented: fragmented.length };
   }
 
-  // Path oluşturma (yoksa)
-  const ensurePath = async (pathStr) => {
-    const parts = pathStr.split('/');
-    let currentId = bar.id;
-    for (const p of parts) {
-      const kids = await api.getChildren(currentId);
-      let f = kids.find(k => !k.url && k.title === p);
-      if (!f) { f = await api.create({ parentId: currentId, title: p }); log(`  [+] klasör: ${pathStr}`); }
-      currentId = f.id;
-    }
-    return currentId;
-  };
+  const { moved, inplace, errors } = await consolidateFragmented(fragmented, bar.id, api, log, warn);
 
-  let moved = 0, inplace = 0, errors = 0;
-  for (const f of fragmented) {
-    try {
-      const targetId = await ensurePath(f.canonical);
-      for (const item of f.items) {
-        if (item.parentId === targetId) { inplace++; continue; }
-        try { await api.move(item.id, { parentId: targetId }); moved++; }
-        catch (e) { warn('move fail:', item.url, e); errors++; }
-      }
-    } catch (e) { warn('ensurePath fail:', f.canonical, e); errors += f.items.length; }
-  }
+  // Kök klasör id'leri korunur (kullanıcının üst kategori yapısı).
+  const protectedIds = new Set((await api.getChildren(bar.id)).map((k) => k.id));
+  await cleanEmptyFolders(bar.id, protectedIds, api);
 
-  // Boş klasör temizliği (kök klasörleri koru)
-  const currentRootKids = await api.getChildren(bar.id);
-  const rootIds = new Set(currentRootKids.map(k => k.id));
-  const cleanEmpty = async (folderId) => {
-    const kids = await api.getChildren(folderId);
-    for (const k of kids) if (!k.url) await cleanEmpty(k.id);
-    const after = await api.getChildren(folderId);
-    if (after.length === 0 && folderId !== bar.id && !rootIds.has(folderId)) {
-      try { await api.removeTree(folderId); } catch {}
-    }
-  };
-  await cleanEmpty(bar.id);
-
+  // ======== SUMMARY ========
   log('');
   log('======== ÖZET ========');
   log(`Konsolide edilen marka: ${fragmented.length}`);
