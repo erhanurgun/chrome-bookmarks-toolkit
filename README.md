@@ -2,7 +2,7 @@
 
 Chrome ve diğer Chromium tabanlı tarayıcıların (Edge, Brave, Opera, Vivaldi, Arc) yer imi ağacını DevTools Console üzerinden organize etmek için yazılmış bağımsız scriptler kümesi. Hiçbir kurulum, eklenti, servis hesabı, harici araç gerektirmez. `chrome://bookmarks` sayfasını açar, F12 ile Console'u açar, scripti yapıştırır, Enter'a basarsınız.
 
-Her script tek bir sorunu çözer: sıralama, tekrar temizleme, klasör düzleştirme, hostname bazlı alt gruplama, başlık yeniden adlandırma, geçici URL temizleme, marka konsolidasyonu. Hepsi `DRY_RUN` ile önizlemeye izin verir, istediğinizde uygular.
+Her script tek bir sorunu çözer: sıralama, tekrar temizleme, klasör düzleştirme, hostname bazlı alt gruplama, başlık yeniden adlandırma, geçici URL temizleme, marka konsolidasyonu. Ayrıca analiz ve yedek için ağacı JSON olarak indiren bir yardımcı script de mevcuttur. Değişiklik yapan scriptlerin hepsi `DRY_RUN` ile önizlemeye izin verir, istediğinizde uygular.
 
 ## İçindekiler
 
@@ -83,6 +83,22 @@ sed 's/const DRY_RUN = true/const DRY_RUN = false/' 01-sort.js | xclip -selectio
 ```
 
 ## Scriptler
+
+### 00-dump-tree-as-json.js: Ağacı JSON Olarak İndirme
+
+Tüm yer imi ağacını JSON dosyası olarak indirir. Hiçbir değişiklik yapmaz, sadece okur. Chrome'un kendi HTML export özelliğine alternatif değildir (HTML geri yüklenebilir, JSON değil) ama ham yapıyı programatik işlemeye uygun şekilde dışa aktarır.
+
+Tipik kullanım alanları şunlardır.
+
+- Harici script (Python, Node, jq) ile kategori analizi yapmak: klasör sayımı, domain dağılımı, duplicate tespiti, özel sorgular
+- Büyük değişikliklerden önce hızlı ham yedek almak (HTML export ile birlikte kullanın)
+- İki farklı zamanın ağacını `diff` ile karşılaştırmak, değişiklikleri görmek
+- Debug amaçlı: bookmark ID'leri, eklenme tarihleri, guid'leri incelemek
+
+Yapılandırma:
+
+- `FILENAME`: indirilecek dosya adı (varsayılan `chrome-bookmarks-tree.json`)
+- `PRETTY_PRINT`: dosyanın okunabilir olması için indentli format (varsayılan açık, kapatırsanız boyut küçülür)
 
 ### 01-sort.js: Alfabetik Sıralama
 
