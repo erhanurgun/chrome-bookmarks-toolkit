@@ -188,6 +188,6 @@
   log(`Hata: ${errors}`);
   log(`Süre: ${dt} saniye`);
   if (DRY_RUN) log('DRY_RUN=true → değişiklik yapılmadı. Onayla: DRY_RUN=false');
-  else log('TAMAMLANDI. 01-sort.js çalıştırmak iyi olur.');
+  else log('TAMAMLANDI. 08-sort.js çalıştırmak iyi olur.');
   return { foldersMerged, foldersRemoved, urlsRemoved, errors };
 })();

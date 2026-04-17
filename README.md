@@ -49,19 +49,19 @@ Büyük bir operasyondan önce `chrome://bookmarks` sayfasına girin, sağ üstt
 Linux için:
 
 ```bash
-xclip -selection clipboard < 01-sort.js
+xclip -selection clipboard < 08-sort.js
 ```
 
 macOS için:
 
 ```bash
-pbcopy < 01-sort.js
+pbcopy < 08-sort.js
 ```
 
 Windows (PowerShell) için:
 
 ```powershell
-Get-Content 01-sort.js | Set-Clipboard
+Get-Content 08-sort.js | Set-Clipboard
 ```
 
 Alternatif olarak dosyayı editörde açıp `Ctrl+A` `Ctrl+C` yapabilirsiniz.
@@ -72,19 +72,19 @@ Alternatif olarak dosyayı editörde açıp `Ctrl+A` `Ctrl+C` yapabilirsiniz.
 
 ### 4. Raporu Okuyun
 
-Script `DRY_RUN` modda başlar. Konsol çıktısında ne yapmayı planladığını gösterir. Örneğin `02-dedupe-folders-and-urls.js` kaç duplicate klasör birleştireceğini ve kaç URL sileceğini, `06-cleanup-ephemeral-urls.js` hangi kategorilerde kaç eşleşme bulduğunu listeler.
+Script `DRY_RUN` modda başlar. Konsol çıktısında ne yapmayı planladığını gösterir. Örneğin `02-dedupe-folders-and-urls.js` kaç duplicate klasör birleştireceğini ve kaç URL sileceğini, `03-cleanup-ephemeral-urls.js` hangi kategorilerde kaç eşleşme bulduğunu listeler.
 
 ### 5. Uygulayın
 
 Rapor memnun edicilse scriptin başındaki `const DRY_RUN = true;` satırını `const DRY_RUN = false;` olarak değiştirip yeniden yapıştırın. Aynı Console oturumunda üst ok tuşuyla önceki komutu getirip düzenleyebilirsiniz. Alternatif olarak panoya sed ile değiştirerek alın:
 
 ```bash
-sed 's/const DRY_RUN = true/const DRY_RUN = false/' 01-sort.js | xclip -selection clipboard
+sed 's/const DRY_RUN = true/const DRY_RUN = false/' 08-sort.js | xclip -selection clipboard
 ```
 
 ## Scriptler
 
-### 00-dump-tree-as-json.js: Ağacı JSON Olarak İndirme
+### 01-dump-tree-as-json.js: Ağacı JSON Olarak İndirme
 
 Tüm yer imi ağacını JSON dosyası olarak indirir. Hiçbir değişiklik yapmaz, sadece okur. Chrome'un kendi HTML export özelliğine alternatif değildir (HTML geri yüklenebilir, JSON değil) ama ham yapıyı programatik işlemeye uygun şekilde dışa aktarır.
 
@@ -100,7 +100,7 @@ Yapılandırma:
 - `FILENAME`: indirilecek dosya adı (varsayılan `chrome-bookmarks-tree.json`)
 - `PRETTY_PRINT`: dosyanın okunabilir olması için indentli format (varsayılan açık, kapatırsanız boyut küçülür)
 
-### 01-sort.js: Alfabetik Sıralama
+### 08-sort.js: Alfabetik Sıralama
 
 Her klasörde alt klasörler önce, URL'ler sonra olacak şekilde alfabetik sıralar. "Other" veya "Diğer" (veya listedeki başka eşdeğer isimlerle başlayan) klasörler ve URL'ler kendi grubunun sonuna alınır.
 
@@ -131,7 +131,7 @@ Normalize kuralları:
 
 İşlem rekursiftir, ağacın her seviyesinde uygulanır.
 
-### 03-flatten-small-folders.js: Küçük Klasörleri Düzleştirme
+### 07-flatten-small-folders.js: Küçük Klasörleri Düzleştirme
 
 Kök seviyedeki (yer imleri çubuğunun doğrudan altındaki) ana kategorilere dokunmaz, bunlar sizin üst yapınızdır. Alt seviyelerdeki boş, tek ögeli ve isteğe bağlı olarak iki ögeli klasörleri düzleştirir. Düzleştirme: klasörün içeriği parent'a taşınır, klasör silinir.
 
@@ -144,25 +144,25 @@ Yapılandırma:
 
 Uygulama sırası iki ögeli, tek ögeli, boş şeklindedir, çünkü iki ögeli klasör düzleştirmesi parent'ta yeni tek ögeli klasör yaratabilir.
 
-### 04-subfolder-by-hostname.js: Hostname Bazlı Alt Gruplama
+### 05-subfolder-by-hostname.js: Hostname Bazlı Alt Gruplama
 
 Aynı klasör içinde aynı hostname'e sahip en az iki URL varsa (örneğin altı farklı Gmail hesabına link, üç farklı `feeds.feedburner.com` RSS), bu hostname adıyla bir alt klasör oluşturur, URL'leri oraya taşır. Her URL'nin başlığını `hostname + path` biçimine getirerek karışıklığı önler.
 
-Kullanım senaryosu: `05-rename-to-hostname.js` çalıştırıldıktan sonra birçok URL aynı başlığa (hostname'e) sahip olur. Bu script o durumu ayrıştırmak için özel olarak tasarlanmıştır.
+Kullanım senaryosu: `04-rename-to-hostname.js` çalıştırıldıktan sonra birçok URL aynı başlığa (hostname'e) sahip olur. Bu script o durumu ayrıştırmak için özel olarak tasarlanmıştır.
 
 Yapılandırma:
 
 - `MIN_DUP`: alt klasör açmak için minimum kaç aynı hostname (varsayılan 2)
 
-### 05-rename-to-hostname.js: Başlıkları Hostname'e Çevirme
+### 04-rename-to-hostname.js: Başlıkları Hostname'e Çevirme
 
 Tüm yer imi başlıklarını URL'deki hostname'e dönüştürür. `www.` atılır, path ve query eklenmez. Klasör yapınız zaten kategorize ediyorsa uzun orijinal sayfa başlıkları yerine temiz hostname daha okunaklı olur.
 
 YouTube istisnası: path içeren YouTube URL'leri (video, kanal, shorts, playlist) silinir. Sadece ana sayfa `youtube.com` olarak kalır. Bu opsiyonel: `CLEANUP_YOUTUBE_PATHS = false` ile kapatılır. Mantık: YouTube içeriği aramayla kolayca yeniden bulunabilir, saklamaya genelde gerek yoktur.
 
-Bu işlem sonrası aynı hostname'e sahip birden fazla URL olabilir. Bunu gidermek için `04-subfolder-by-hostname.js` veya `02-dedupe-folders-and-urls.js` çalıştırın.
+Bu işlem sonrası aynı hostname'e sahip birden fazla URL olabilir. Bunu gidermek için `05-subfolder-by-hostname.js` veya `02-dedupe-folders-and-urls.js` çalıştırın.
 
-### 06-cleanup-ephemeral-urls.js: Geçici URL Temizleme
+### 03-cleanup-ephemeral-urls.js: Geçici URL Temizleme
 
 "Aramayla yeniden bulunabilir" karakterdeki URL'leri siler. Kategoriler regex pattern'leri olarak tanımlıdır, istemediğiniz kategoriyi yorum satırı yaparak devre dışı bırakırsınız.
 
@@ -183,7 +183,7 @@ Korunanlar:
 - DuckDuckGo bangs sayfası
 - Ana sayfa URL'leri (path'siz veya kök path)
 
-### 07-consolidate-brand.js: Marka Konsolidasyonu
+### 06-consolidate-brand.js: Marka Konsolidasyonu
 
 Aynı markaya ait ama farklı klasörlere dağılmış yer imlerini tek kanonik klasöre toplar. Marka iki farklı yolla tespit edilir.
 
@@ -208,12 +208,12 @@ Konsolidasyon sonrası boş kalan klasörler temizlenir (kök klasörler korunur
 Dağınık bir ağacı sıfırdan organize ediyorsanız aşağıdaki sıra tipik olarak en temiz sonucu verir. Her adım öncesinde DRY_RUN ile önizlemenizi öneririm.
 
 1. `02-dedupe-folders-and-urls.js`: en temelde aynı URL ve klasör tekrarlarını ortadan kaldırır
-2. `06-cleanup-ephemeral-urls.js`: geçici içeriği temizler, sonraki adımlar daha az URL üzerinde çalışır
-3. `05-rename-to-hostname.js`: başlıkları normalize eder, aynı kaynakları ayırt etmek kolaylaşır
-4. `04-subfolder-by-hostname.js`: aynı hostname'li duplikatları alt klasöre gruplar
-5. `07-consolidate-brand.js`: dağılmış markaları toplar
-6. `03-flatten-small-folders.js`: boş ve minik klasörleri düzleştirir
-7. `01-sort.js`: son rötuş olarak alfabetik sıralama
+2. `03-cleanup-ephemeral-urls.js`: geçici içeriği temizler, sonraki adımlar daha az URL üzerinde çalışır
+3. `04-rename-to-hostname.js`: başlıkları normalize eder, aynı kaynakları ayırt etmek kolaylaşır
+4. `05-subfolder-by-hostname.js`: aynı hostname'li duplikatları alt klasöre gruplar
+5. `06-consolidate-brand.js`: dağılmış markaları toplar
+6. `07-flatten-small-folders.js`: boş ve minik klasörleri düzleştirir
+7. `08-sort.js`: son rötuş olarak alfabetik sıralama
 
 Belli bir sorunla karşılaştıysanız sadece ilgili scripti çalıştırabilirsiniz, sıralı akış zorunlu değildir.
 
@@ -231,19 +231,19 @@ Sonuç: Normalize edilmiş dedup, duplicate URL'lerin sadece ilk örneği kalır
 
 Belirti: Yüzlerce `youtube.com/watch?v=...` URL'si, zamanla kaybolan video listesi.
 
-Uygulanacak: `06-cleanup-ephemeral-urls.js` (önce DRY_RUN ile listeyi gözden geçirin), veya `05-rename-to-hostname.js` içindeki `CLEANUP_YOUTUBE_PATHS` ile path'li YouTube'ları silip sadece `youtube.com` ana sayfasını tutun.
+Uygulanacak: `03-cleanup-ephemeral-urls.js` (önce DRY_RUN ile listeyi gözden geçirin), veya `04-rename-to-hostname.js` içindeki `CLEANUP_YOUTUBE_PATHS` ile path'li YouTube'ları silip sadece `youtube.com` ana sayfasını tutun.
 
 ### Senaryo 3: Google servisleri yedi sekiz klasöra dağılmış
 
 Belirti: `Gmail` "İş" klasöründe, `Drive` "Dokümantasyon"da, `Google Calendar` "Takvim" altında, hepsi aynı Google hesabına ait.
 
-Uygulanacak: `07-consolidate-brand.js`. Script `google.com` eTLD+1'ini tespit eder, en sık bulunduğu ana kategori altında `*.google.com` (veya manuel olarak `USER_PRIORITY_MAP['google.com'] = 'Google Services'` tanımlayarak belirlediğiniz klasör) altında toplar.
+Uygulanacak: `06-consolidate-brand.js`. Script `google.com` eTLD+1'ini tespit eder, en sık bulunduğu ana kategori altında `*.google.com` (veya manuel olarak `USER_PRIORITY_MAP['google.com'] = 'Google Services'` tanımlayarak belirlediğiniz klasör) altında toplar.
 
 ### Senaryo 4: Onlarca boş ve tek ögeli klasör
 
 Belirti: Yıllar içinde oluşturulan "Kitap Öneri", "Sonra Okunacak", "Linux Araçları" gibi klasörler, içinde bir veya sıfır ögeyle karışıklık yaratıyor.
 
-Uygulanacak: `03-flatten-small-folders.js`. Varsayılan ayarlarla boş ve tek ögeli klasörler düzleştirilir, içerik parent'a taşınır.
+Uygulanacak: `07-flatten-small-folders.js`. Varsayılan ayarlarla boş ve tek ögeli klasörler düzleştirilir, içerik parent'a taşınır.
 
 ## Özelleştirme
 
@@ -251,13 +251,13 @@ Her script yapılandırma bloğu ile başlar (`USER SETTINGS` etiketli). En sık
 
 `BAR_TITLES`: Chrome yer imleri çubuğunun başlığı dil ayarınıza göre değişir. Varsayılan liste İngilizce, Türkçe, Fransızca, Almanca varyantlarını içerir. Başka bir dil kullanıyorsanız buraya ekleyin.
 
-`LOCALE`: Sıralama ve karşılaştırma locale kodu. `01-sort.js` için varsayılan `tr`. Farklı dillere `en`, `de`, `es` gibi kodlar kullanın.
+`LOCALE`: Sıralama ve karşılaştırma locale kodu. `08-sort.js` için varsayılan `tr`. Farklı dillere `en`, `de`, `es` gibi kodlar kullanın.
 
-`LAST_NAMES` (sadece 01-sort.js): Sıralamada sona alınacak klasör adı kalıpları. Varsayılanda `other`, `diğer`, `misc`, `sonstiges` vardır. Kendi dilinize göre ekleme yapabilirsiniz.
+`LAST_NAMES` (sadece 08-sort.js): Sıralamada sona alınacak klasör adı kalıpları. Varsayılanda `other`, `diğer`, `misc`, `sonstiges` vardır. Kendi dilinize göre ekleme yapabilirsiniz.
 
-`PATTERNS` (sadece 06-cleanup-ephemeral-urls.js): Silinecek URL kategorileri regex listesi. Silmek istemediğiniz kategoriyi yorum satırı yaparsanız o pattern devre dışı kalır.
+`PATTERNS` (sadece 03-cleanup-ephemeral-urls.js): Silinecek URL kategorileri regex listesi. Silmek istemediğiniz kategoriyi yorum satırı yaparsanız o pattern devre dışı kalır.
 
-`USER_PRIORITY_MAP` (sadece 07-consolidate-brand.js): Belirli domain'leri belirli klasöre zorunlu yönlendirmek için kullanılır. Örnek:
+`USER_PRIORITY_MAP` (sadece 06-consolidate-brand.js): Belirli domain'leri belirli klasöre zorunlu yönlendirmek için kullanılır. Örnek:
 
 ```js
 const USER_PRIORITY_MAP = {
@@ -322,7 +322,7 @@ Console filtresinin "Info" seviyesi kapalı olabilir. Console üstündeki Defaul
 <details>
 <summary>2000+ yer imim var, script ne kadar sürer?</summary>
 
-API çağrıları sıralı async olduğu için büyük ağaçlar birkaç dakika sürebilir. Her script Console'da ilerleme bilgisi yazar. `02-dedupe-folders-and-urls.js` ve `07-consolidate-brand.js` en yoğun çalışan scriptlerdir.
+API çağrıları sıralı async olduğu için büyük ağaçlar birkaç dakika sürebilir. Her script Console'da ilerleme bilgisi yazar. `02-dedupe-folders-and-urls.js` ve `06-consolidate-brand.js` en yoğun çalışan scriptlerdir.
 
 </details>
 
@@ -351,7 +351,7 @@ Chrome Enterprise bazı organizasyonlarda DevTools'u veya yer imi düzenlemeyi k
 
 **Başlıksız yer imleri.** Yalnız favicon olarak görünen başlıksız yer imlerini bazı scriptler (özellikle sıralama ve duplicate title tespiti) doğru karşılaştıramaz. Önce başlık verin, sonra çalıştırın.
 
-**Özel URL şemaları.** `chrome://`, `javascript:`, `file://`, `about:` ile başlayan yer imleri `05-rename-to-hostname.js` tarafından atlanır çünkü hostname kavramı yoktur.
+**Özel URL şemaları.** `chrome://`, `javascript:`, `file://`, `about:` ile başlayan yer imleri `04-rename-to-hostname.js` tarafından atlanır çünkü hostname kavramı yoktur.
 
 **Çok uzun URL'ler.** 2000 karakterden uzun URL'ler bazı scriptlerce atlanabilir (muhtemelen data URL veya kaybolmuş token'dır).
 
@@ -363,7 +363,7 @@ Chrome Enterprise bazı organizasyonlarda DevTools'u veya yer imi düzenlemeyi k
 
 Pull request'ler hoş karşılanır. Aşağıdaki konularda özellikle katkı beklenir.
 
-- Yeni `06-cleanup-ephemeral-urls.js` pattern'leri (yeni sosyal medya siteleri, yeni e-ticaret pazar yerleri)
+- Yeni `03-cleanup-ephemeral-urls.js` pattern'leri (yeni sosyal medya siteleri, yeni e-ticaret pazar yerleri)
 - Farklı dil locale'ları için `BAR_TITLES` eklemeleri
 - Yeni senaryolar için scriptler (örneğin "aynı domain'den sayfa sayısı gereksiz ölçüde fazla olan klasörleri tespit")
 - Dokümantasyon iyileştirmeleri
