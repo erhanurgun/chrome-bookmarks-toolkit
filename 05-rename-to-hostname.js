@@ -31,100 +31,136 @@
   const SHOW_SAMPLE = 40;
   // ================================
 
-  const api = {
-    getTree: () => new Promise(r => chrome.bookmarks.getTree(r)),
-    update: (id, ch) => new Promise(r => chrome.bookmarks.update(id, ch, r)),
-    remove: (id) => new Promise((ok, fail) => chrome.bookmarks.remove(id, () => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok();
-    })),
-  };
-  const log = (...a) => console.log('[rename]', ...a);
-  const warn = (...a) => console.warn('[rename]', ...a);
+  // ======== CONSTANTS ========
+  // Duplicate uyarı listesinde gösterilecek ilk N hostname.
+  const DUP_WARN_HEAD = 15;
+  // ================================
 
-  const analyze = (url) => {
+  // ======== HELPERS ========
+  const makeLogger = (prefix) => ({
+    log: (...args) => console.log(`[${prefix}]`, ...args),
+    warn: (...args) => console.warn(`[${prefix}]`, ...args),
+    error: (...args) => console.error(`[${prefix}]`, ...args),
+  });
+
+  const makeApi = () => ({
+    getTree: () => new Promise((resolve) => chrome.bookmarks.getTree(resolve)),
+    update: (id, changes) => new Promise((resolve) => chrome.bookmarks.update(id, changes, resolve)),
+    remove: (id) => new Promise((resolve, reject) => chrome.bookmarks.remove(id, () => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve();
+    })),
+  });
+
+  // Tüm ağacı pre-order gezip URL node'larında visitor çağırır.
+  const walkTree = (node, visitor) => {
+    if (node.url) { visitor(node); return; }
+    for (const child of (node.children || [])) walkTree(child, visitor);
+  };
+
+  // Saf fonksiyon: bir URL için yapılacak eylemi belirler.
+  //   - skip: http/https dışı (chrome://, javascript:, file://, about:)
+  //   - delete: path'li YouTube URL'si ve config izin veriyor
+  //   - rename: hostname'e çevrilecek (YouTube ana sayfa dahil)
+  const classifyBookmark = (url, config) => {
     try {
       const u = new URL(url);
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') return { skip: true };
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return { action: 'skip' };
       let host = u.hostname.toLowerCase();
       if (host.startsWith('www.')) host = host.slice(4);
       const hasPath = u.pathname && u.pathname !== '/' && u.pathname !== '';
 
-      if (CLEANUP_YOUTUBE_PATHS && YT_DOMAINS.has(host)) {
+      if (config.cleanupYoutubePaths && config.ytDomains.has(host)) {
         if (hasPath) return { action: 'delete' };
         return { action: 'rename', newTitle: 'youtube.com' };
       }
       return { action: 'rename', newTitle: host };
-    } catch { return { skip: true }; }
+    } catch { return { action: 'skip' }; }
   };
+
+  // Saf fonksiyon: tüm yer imleri için karar listesi üretir.
+  // finalTitleCount, işlem sonrası aynı başlığa sahip URL'leri uyarmak için.
+  const analyzeAll = (bookmarks, config) => {
+    const toDelete = [];
+    const toRename = [];
+    const finalTitleCount = {};
+    let unchanged = 0, skipped = 0;
+
+    for (const b of bookmarks) {
+      const r = classifyBookmark(b.url, config);
+      if (r.action === 'skip') { skipped++; continue; }
+      if (r.action === 'delete') { toDelete.push(b); continue; }
+      finalTitleCount[r.newTitle] = (finalTitleCount[r.newTitle] || 0) + 1;
+      if ((b.title || '') === r.newTitle) { unchanged++; continue; }
+      toRename.push({ id: b.id, oldTitle: b.title || '', newTitle: r.newTitle, url: b.url });
+    }
+    return { toDelete, toRename, finalTitleCount, unchanged, skipped };
+  };
+
+  const printAnalysis = (report, showSample, dryRun, log) => {
+    const { toDelete, toRename, finalTitleCount, unchanged, skipped } = report;
+    log(`======== ANALİZ (DRY_RUN=${dryRun}) ========`);
+    log(`Silinecek (YouTube path'li): ${toDelete.length}`);
+    log(`Yeniden adlandırılacak: ${toRename.length}`);
+    log(`Zaten uygun: ${unchanged}`);
+    log(`Atlanan (http/https dışı): ${skipped}`);
+
+    const dupes = Object.entries(finalTitleCount).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+    if (dupes.length) {
+      log('');
+      log(`Dikkat: ${dupes.length} hostname birden fazla kez (aynı başlığa sahip olurlar):`);
+      for (const [h, n] of dupes.slice(0, DUP_WARN_HEAD)) log(`  ${String(n).padStart(3)}  ${h}`);
+      if (dupes.length > DUP_WARN_HEAD) log(`  ... ve ${dupes.length - DUP_WARN_HEAD} daha`);
+      log('→ sonra 04-subfolder-by-hostname.js çalıştırın');
+    }
+
+    if (toDelete.length) {
+      log('');
+      log(`Silinecek örnekler:`);
+      for (const b of toDelete.slice(0, showSample)) log(`  "${b.title || '(başlıksız)'}"   ${b.url.slice(0, 80)}`);
+      if (toDelete.length > showSample) log(`  ... ve ${toDelete.length - showSample} daha`);
+    }
+    if (toRename.length) {
+      log('');
+      log(`Yeniden adlandırma örnekleri:`);
+      for (const r of toRename.slice(0, showSample)) log(`  "${r.oldTitle}"  →  "${r.newTitle}"`);
+      if (toRename.length > showSample) log(`  ... ve ${toRename.length - showSample} daha`);
+    }
+  };
+
+  const applyChanges = async (report, api, log, warn) => {
+    let deleted = 0, renamed = 0, errors = 0;
+    for (const b of report.toDelete) {
+      try { await api.remove(b.id); deleted++; }
+      catch (e) { warn('remove fail:', b.url, e); errors++; }
+    }
+    for (const r of report.toRename) {
+      try { await api.update(r.id, { title: r.newTitle }); renamed++; }
+      catch (e) { warn('update fail:', r.url, e); errors++; }
+    }
+    return { deleted, renamed, errors };
+  };
+
+  // ======== MAIN ========
+  const { log, warn } = makeLogger('rename');
+  const api = makeApi();
 
   const tree = await api.getTree();
   const all = [];
-  const walk = (n) => {
-    if (n.url) all.push(n);
-    if (n.children) for (const c of n.children) walk(c);
-  };
-  walk(tree[0]);
+  walkTree(tree[0], (node) => all.push(node));
 
-  const toDelete = [];
-  const toRename = [];
-  let unchanged = 0, skipped = 0;
-  const finalTitleCount = {};
-
-  for (const b of all) {
-    const r = analyze(b.url);
-    if (r.skip) { skipped++; continue; }
-    if (r.action === 'delete') { toDelete.push(b); continue; }
-    finalTitleCount[r.newTitle] = (finalTitleCount[r.newTitle] || 0) + 1;
-    if ((b.title || '') === r.newTitle) { unchanged++; continue; }
-    toRename.push({ id: b.id, oldTitle: b.title || '', newTitle: r.newTitle, url: b.url });
-  }
-
-  // Aynı hostname'e sahip birden fazla bookmark uyarısı
-  const dupes = Object.entries(finalTitleCount).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
-
-  log(`======== ANALİZ (DRY_RUN=${DRY_RUN}) ========`);
-  log(`Silinecek (YouTube path'li): ${toDelete.length}`);
-  log(`Yeniden adlandırılacak: ${toRename.length}`);
-  log(`Zaten uygun: ${unchanged}`);
-  log(`Atlanan (http/https dışı): ${skipped}`);
-
-  if (dupes.length) {
-    log('');
-    log(`Dikkat: ${dupes.length} hostname birden fazla kez (aynı başlığa sahip olurlar):`);
-    for (const [h, n] of dupes.slice(0, 15)) log(`  ${String(n).padStart(3)}  ${h}`);
-    if (dupes.length > 15) log(`  ... ve ${dupes.length - 15} daha`);
-    log('→ sonra 04-subfolder-by-hostname.js çalıştırın');
-  }
-
-  if (toDelete.length) {
-    log('');
-    log(`Silinecek örnekler:`);
-    for (const b of toDelete.slice(0, SHOW_SAMPLE)) log(`  "${b.title || '(başlıksız)'}"   ${b.url.slice(0, 80)}`);
-    if (toDelete.length > SHOW_SAMPLE) log(`  ... ve ${toDelete.length - SHOW_SAMPLE} daha`);
-  }
-  if (toRename.length) {
-    log('');
-    log(`Yeniden adlandırma örnekleri:`);
-    for (const r of toRename.slice(0, SHOW_SAMPLE)) log(`  "${r.oldTitle}"  →  "${r.newTitle}"`);
-    if (toRename.length > SHOW_SAMPLE) log(`  ... ve ${toRename.length - SHOW_SAMPLE} daha`);
-  }
+  const config = { cleanupYoutubePaths: CLEANUP_YOUTUBE_PATHS, ytDomains: YT_DOMAINS };
+  const report = analyzeAll(all, config);
+  printAnalysis(report, SHOW_SAMPLE, DRY_RUN, log);
 
   if (DRY_RUN) {
     log('');
     log('DRY_RUN=true → değişiklik yok. Onayla: DRY_RUN=false');
-    return { toDelete: toDelete.length, toRename: toRename.length };
+    return { toDelete: report.toDelete.length, toRename: report.toRename.length };
   }
 
-  let deleted = 0, renamed = 0, errors = 0;
-  for (const b of toDelete) {
-    try { await api.remove(b.id); deleted++; }
-    catch (e) { warn('remove fail:', b.url, e); errors++; }
-  }
-  for (const r of toRename) {
-    try { await api.update(r.id, { title: r.newTitle }); renamed++; }
-    catch (e) { warn('update fail:', r.url, e); errors++; }
-  }
+  const { deleted, renamed, errors } = await applyChanges(report, api, log, warn);
 
+  // ======== SUMMARY ========
   log('');
   log('======== ÖZET ========');
   log(`Silinen: ${deleted}`);
