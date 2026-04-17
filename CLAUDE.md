@@ -27,12 +27,17 @@ sed 's/const DRY_RUN = true/const DRY_RUN = false/' 02-dedupe-folders-and-urls.j
 Her betik (`NN-description.js`) aynı yapıyı paylaşır ve yeni betik eklerken bu desen korunmalıdır:
 
 1. **IIFE async sarmalayıcı**: `(async () => { 'use strict'; ... })()` ile global kirlenme engellenir ve `await` kullanımı mümkün olur.
-2. **`USER SETTINGS` bloğu**: Dosyanın başında, `// ======== USER SETTINGS ========` arasında. Kullanıcının değiştirmesi beklenen tüm sabitler (`DRY_RUN`, `BAR_TITLES`, eşikler, regex'ler, locale) burada toplanır.
-3. **`DRY_RUN` sabiti** (01-sort.js hariç zorunlu): `true` iken yalnız rapor üretir, `false` iken uygular. Varsayılan `true` olmalıdır.
-4. **`api` objesi**: `chrome.bookmarks` callback API'sini Promise'a saran mini adaptör (`getTree`, `getChildren`, `move`, `remove`, `removeTree`, `create`). Callback versiyonu doğrudan kullanılmaz, `chrome.runtime.lastError` kontrolü sarmalayıcıda yapılır.
-5. **Logger**: `[kisa-isim]` prefix'li `console.log`/`console.warn` sarmalayıcıları (örn. `[sort]`, `[dedupe]`, `[brand]`).
-6. **Kök bulma**: `tree[0].children.find(c => c.id === '1' || BAR_TITLES.includes(c.title))` deseni "Yer imleri çubuğu"nu bulur. `BAR_TITLES` tarayıcı dil ayarına göre varsayılan başlık varyasyonlarını içerir (EN/TR/FR/DE).
-7. **Özet formatı**: Sonda `======== ÖZET ========` başlığı, istatistikler, DRY_RUN durumunda onay mesajı (`DRY_RUN=false yap, yeniden yapıştır`).
+2. **Sabit bölüm sırası**: Her dosya aşağıdaki sırayla beş bölüm içerir (aynı başlık ifadeleriyle):
+   - `// ======== USER SETTINGS ========` sık değiştirilen konfig (`DRY_RUN`, `BAR_TITLES`, eşikler, regex'ler, locale).
+   - `// ======== CONSTANTS ========` nadiren değişen sabit tablolar (örn. `MERGE_LOG_HEAD`, `SAMPLE_HEAD`, `PROGRESS_EVERY`, `DEFAULT_PORTS`, `DUP_WARN_HEAD`). Kullanıcı tarafından değiştirilmesi beklenen değerler USER SETTINGS'te kalır.
+   - `// ======== HELPERS ========` factory'ler ve saf yardımcı fonksiyonlar (`makeApi`, `makeLogger`, `findBar`, ihtiyaca göre `normalizeUrl`, `getHost`, `getRegistrable`, `extractPrefix`, `collectBookmarks`/`collectFolders`).
+   - `// ======== MAIN ========` iş akışı, birden fazla SRP fonksiyonuna bölünmüş koordinatör.
+   - `// ======== SUMMARY ========` sonda `======== ÖZET ========` başlığı, istatistikler, DRY_RUN durumunda onay mesajı (`DRY_RUN=false yap, yeniden yapıştır`).
+3. **`DRY_RUN` sabiti** (00 ve 01 hariç zorunlu): `true` iken yalnız rapor üretir, `false` iken uygular. Varsayılan `true` olmalıdır.
+4. **`makeApi` factory**: `chrome.bookmarks` callback API'sini Promise'a saran mini adaptör döner. Her dosya sadece kullandığı metotları içerir (`getTree`, `getChildren`, `move`, `remove`, `removeTree`, `create`, `update`, `get`). Yazma operasyonları (`move`/`create`/`remove`/`removeTree`) için `chrome.runtime.lastError` kontrolü sarmalayıcıda yapılır.
+5. **`makeLogger` factory**: `[kisa-isim]` prefix'li `{ log, warn, error }` üçlüsünü döner. Mevcut prefix'ler: `[dump]`, `[sort]`, `[dedupe]`, `[flatten]`, `[hostgroup]`, `[rename]`, `[ephemeral]`, `[brand]`.
+6. **`findBar` helper**: `tree[0].children` içinden `id === '1'` ya da `BAR_TITLES` eşleşmesiyle "Yer imleri çubuğu"nu bulur. `BAR_TITLES` tarayıcı dil ayarına göre varsayılan başlık varyasyonlarını içerir (EN/TR/FR/DE). Bulamazsa `null` döner, çağıran `console.error` + erken dönüş yapar.
+7. **Kasıtlı DRY ihlali**: Helper'lar (`makeApi`, `makeLogger`, `findBar`, `normalizeUrl`, `getHost` vb.) her dosyada birebir çoğaltılır çünkü derleme adımı yoktur ve her betik tek dosya olarak Console'a yapıştırılır. Bir helper'a dokunmak gerektiğinde ilgili tüm dosyalarda aynı değişiklik tekrarlanmalıdır; bu, no-build felsefesi ile DRY arasındaki bilinçli bir dengedir.
 
 ## Kritik İnvariantlar
 
@@ -83,9 +88,12 @@ Betikler bağımsız çalışır ama anlamsal akış vardır. Yeni bir betik ekl
 
 - Dosya adı `NN-description.js` formatında, `NN` akıştaki mantıklı pozisyon
 - Dosya başında JSDoc bloğu: "Ne yapar" ve "Nasıl kullanılır" Türkçe
-- `USER SETTINGS` bloğu en üstte, `BAR_TITLES` mutlaka var
-- `DRY_RUN` varsayılanı `true`
-- Promise sarmalayıcıları `chrome.runtime.lastError` kontrollü olmalı
+- Bölüm sırası: USER SETTINGS → CONSTANTS (opsiyonel) → HELPERS → MAIN → SUMMARY
+- `BAR_TITLES` bar-odaklı betiklerde mutlaka vardır (tüm ağaçta gezen 00 ve 05 kullanmaz)
+- `DRY_RUN` varsayılanı `true` (değişiklik yapan betikler için)
+- Helper factory'leri (`makeApi`, `makeLogger`, `findBar`) mevcut dosyalardan (örn. 02-dedupe veya 07-consolidate-brand) birebir kopyalanır; imza ve davranış tüm dosyalarda aynıdır
+- Yazma operasyonlarının Promise sarmalayıcısında `chrome.runtime.lastError` kontrolü zorunludur
+- MAIN bölümündeki uzun iş akışları SRP fonksiyonlarına bölünür (ör. `plan*`, `apply*`, `print*`, `collect*`, `build*`)
 - README.md'deki **Scriptler** ve **Önerilen Kullanım Sırası** bölümleri güncellenmeli
 
 ## İletişim ve Dokümantasyon Dili
