@@ -1,5 +1,5 @@
 /**
- * 03 - Flatten Small Folders
+ * 07 - Flatten Small Folders
  *
  * Ne yapar: Az içerikli klasörleri düzleştirir. Seçenekler:
  *   - Boş klasörleri siler
@@ -176,6 +176,6 @@
   log(`Düzleştirilen: ${flattened}`);
   log(`Silinen boş: ${deleted}`);
   log(`Hata: ${errors}`);
-  log('TAMAMLANDI. 01-sort.js ile sıralamayı yenilemek iyi olur.');
+  log('TAMAMLANDI. 08-sort.js ile sıralamayı yenilemek iyi olur.');
   return { flattened, deleted, errors };
 })();

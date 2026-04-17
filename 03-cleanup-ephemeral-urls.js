@@ -1,5 +1,5 @@
 /**
- * 06 - Cleanup Ephemeral URLs
+ * 03 - Cleanup Ephemeral URLs
  *
  * Ne yapar: "Aramayla bulunabilir" kategorisindeki URL'leri (sosyal medya
  *   postları, e-ticaret ürün sayfaları, arama sonuçları, YouTube videoları,

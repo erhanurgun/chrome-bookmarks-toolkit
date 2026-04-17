@@ -1,5 +1,5 @@
 /**
- * 01 - Recursive A-Z Sort
+ * 08 - Recursive A-Z Sort
  *
  * Ne yapar: Chrome yer imleri ağacında her klasör için alt klasörleri
  *   ve URL'leri alfabetik olarak sıralar. Klasörler önce, URL'ler sonra.

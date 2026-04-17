@@ -1,5 +1,5 @@
 /**
- * 05 - Rename Titles to Hostname
+ * 04 - Rename Titles to Hostname
  *
  * Ne yapar: Tüm yer imlerinin başlığını URL'deki hostname'e (www. olmadan)
  *   dönüştürür. Path, query, fragment atılır. Klasör yapınız zaten
@@ -14,7 +14,7 @@
  *   2) DRY_RUN = false yap, uygula.
  *
  * Not: Bu işlemden sonra aynı klasörde aynı hostname'e sahip birden fazla
- *   URL olabilir (aynı başlık). Bunu düzeltmek için 04-subfolder-by-hostname.js
+ *   URL olabilir (aynı başlık). Bunu düzeltmek için 05-subfolder-by-hostname.js
  *   veya 02-dedupe-folders-and-urls.js çalıştırın.
  *
  * chrome://bookmarks → F12 → Console → yapıştır → Enter.
@@ -110,7 +110,7 @@
       log(`Dikkat: ${dupes.length} hostname birden fazla kez (aynı başlığa sahip olurlar):`);
       for (const [h, n] of dupes.slice(0, DUP_WARN_HEAD)) log(`  ${String(n).padStart(3)}  ${h}`);
       if (dupes.length > DUP_WARN_HEAD) log(`  ... ve ${dupes.length - DUP_WARN_HEAD} daha`);
-      log('→ sonra 04-subfolder-by-hostname.js çalıştırın');
+      log('→ sonra 05-subfolder-by-hostname.js çalıştırın');
     }
 
     if (toDelete.length) {
@@ -166,6 +166,6 @@
   log(`Silinen: ${deleted}`);
   log(`Yeniden adlandırılan: ${renamed}`);
   log(`Hata: ${errors}`);
-  log('TAMAMLANDI. 04-subfolder-by-hostname.js ve 01-sort.js çalıştırmak iyi olur.');
+  log('TAMAMLANDI. 05-subfolder-by-hostname.js ve 08-sort.js çalıştırmak iyi olur.');
   return { deleted, renamed, errors };
 })();

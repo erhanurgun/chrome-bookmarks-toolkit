@@ -1,5 +1,5 @@
 /**
- * 04 - Subfolder by Hostname
+ * 05 - Subfolder by Hostname
  *
  * Ne yapar: Aynı klasör içinde aynı hostname'e sahip birden fazla URL varsa
  *   (örn. 3 tane mail.google.com), o hostname adıyla bir alt klasör oluşturur
@@ -7,7 +7,7 @@
  *   günceller (örn. "mail.google.com" → "mail.google.com/mail/u/1").
  *
  * Kullanım amacı: Başlıkların sadece hostname olduğu durumda (örneğin
- *   05-rename-to-hostname.js sonrası) birbirinin aynısı görünen yer imlerini
+ *   04-rename-to-hostname.js sonrası) birbirinin aynısı görünen yer imlerini
  *   ayırt edilebilir hale getirir.
  *
  * Nasıl kullanılır:
@@ -179,6 +179,6 @@
   log(`Taşınan URL: ${moved}`);
   log(`Yeniden adlandırılan: ${renamed}`);
   log(`Hata: ${errors}`);
-  log('TAMAMLANDI. 01-sort.js ile sıralamayı yenileyin.');
+  log('TAMAMLANDI. 08-sort.js ile sıralamayı yenileyin.');
   return { createdFolders, moved, renamed, errors };
 })();

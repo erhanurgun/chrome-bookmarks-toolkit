@@ -1,5 +1,5 @@
 /**
- * 07 - Consolidate Brand
+ * 06 - Consolidate Brand
  *
  * Ne yapar: Parçalanmış markaları tek klasöre toplar. Bir "marka" iki yoldan
  *   tespit edilir:
@@ -306,6 +306,6 @@
   log(`Taşınan URL: ${moved}`);
   log(`Yerinde kalan: ${inplace}`);
   log(`Hata: ${errors}`);
-  log('TAMAMLANDI. 01-sort.js ile sıralamayı yenileyin.');
+  log('TAMAMLANDI. 08-sort.js ile sıralamayı yenileyin.');
   return { fragmented: fragmented.length, moved, inplace, errors };
 })();
