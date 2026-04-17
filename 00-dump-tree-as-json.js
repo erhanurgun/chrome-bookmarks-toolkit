@@ -24,31 +24,54 @@
   const PRETTY_PRINT = true;   // false yaparsan tek satır compact JSON
   // ================================
 
-  const log = (...a) => console.log('[dump]', ...a);
+  // ======== HELPERS ========
+  const makeLogger = (prefix) => ({
+    log: (...args) => console.log(`[${prefix}]`, ...args),
+    warn: (...args) => console.warn(`[${prefix}]`, ...args),
+    error: (...args) => console.error(`[${prefix}]`, ...args),
+  });
 
-  const tree = await new Promise(r => chrome.bookmarks.getTree(r));
+  const makeApi = () => ({
+    getTree: () => new Promise((resolve) => chrome.bookmarks.getTree(resolve)),
+  });
 
-  // Basit istatistik
-  let urlCount = 0, folderCount = 0, maxDepth = 0;
-  const walk = (node, depth = 0) => {
-    if (depth > maxDepth) maxDepth = depth;
-    for (const c of (node.children || [])) {
-      if (c.url) urlCount++;
-      else { folderCount++; walk(c, depth + 1); }
-    }
+  // Tüm ağacı tek geçişte gezip URL/klasör/derinlik istatistiği toplar.
+  const collectStats = (root) => {
+    const stats = { urlCount: 0, folderCount: 0, maxDepth: 0 };
+    const walk = (node, depth) => {
+      if (depth > stats.maxDepth) stats.maxDepth = depth;
+      for (const child of (node.children || [])) {
+        if (child.url) stats.urlCount++;
+        else { stats.folderCount++; walk(child, depth + 1); }
+      }
+    };
+    walk(root, 0);
+    return stats;
   };
-  walk(tree[0]);
 
+  // Tarayıcıda programatik indirme: geçici anchor + blob URL.
+  const downloadBlob = (filename, content, mimeType) => {
+    const blob = new Blob([content], { type: mimeType });
+    const anchor = document.createElement('a');
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(anchor.href);
+  };
+
+  // ======== MAIN ========
+  const { log } = makeLogger('dump');
+  const api = makeApi();
+
+  const tree = await api.getTree();
+  const stats = collectStats(tree[0]);
   const json = PRETTY_PRINT ? JSON.stringify(tree, null, 2) : JSON.stringify(tree);
-  const blob = new Blob([json], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = FILENAME;
-  a.click();
-  URL.revokeObjectURL(a.href);
 
+  downloadBlob(FILENAME, json, 'application/json');
+
+  // ======== SUMMARY ========
   log(`${FILENAME} indirildi`);
   log(`Boyut: ${(json.length / 1024).toFixed(1)} KB`);
-  log(`Toplam URL: ${urlCount}, klasör: ${folderCount}, maksimum derinlik: ${maxDepth}`);
+  log(`Toplam URL: ${stats.urlCount}, klasör: ${stats.folderCount}, maksimum derinlik: ${stats.maxDepth}`);
   log(`İndirme yeri: varsayılan Downloads klasörünüz`);
 })();
