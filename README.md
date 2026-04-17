@@ -365,8 +365,10 @@ Pull request'ler hoş karşılanır. Aşağıdaki konularda özellikle katkı be
 
 - Yeni `06-cleanup-ephemeral-urls.js` pattern'leri (yeni sosyal medya siteleri, yeni e-ticaret pazar yerleri)
 - Farklı dil locale'ları için `BAR_TITLES` eklemeleri
-- Yeni senaryolar için scriptler (örneğin "aynı domain'den sayfa sayısı Ngereksiz ölçüde fazla olan klasörleri tespit")
+- Yeni senaryolar için scriptler (örneğin "aynı domain'den sayfa sayısı gereksiz ölçüde fazla olan klasörleri tespit")
 - Dokümantasyon iyileştirmeleri
+
+Yeni betik yazarken standart bölüm sırası korunmalıdır: `USER SETTINGS → CONSTANTS → HELPERS → MAIN → SUMMARY`. Ortak helper'lar (`makeApi`, `makeLogger`, `findBar`) mevcut dosyalardan birebir kopyalanır; derleme adımı olmadığı için DRY kasıtlı olarak her dosyada çoğaltılır. Detay için `CLAUDE.md` dosyasındaki **Ortak Betik Mimarisi** bölümüne bakın.
 
 Issue açarken mümkünse tarayıcı sürümünüzü, yer imi sayınızı ve Console çıktısını paylaşın.
 
