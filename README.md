@@ -298,33 +298,54 @@ Chromium tabanlı tarayıcılarda çalışır. Firefox farklı bir bookmarks API
 
 ## Sıkça Sorulan Sorular
 
-**Soru: Yanlışlıkla yanlış DRY_RUN değerini yapıştırdım ve istemediğim işlem yapıldı. Ne yapabilirim?**
+<details>
+<summary>Yanlışlıkla yanlış DRY_RUN değerini yapıştırdım ve istemediğim işlem yapıldı. Ne yapabilirim?</summary>
 
-Cevap: Önceden HTML yedek aldıysanız `chrome://bookmarks` üzerinden o yedeği içe aktarabilirsiniz. Yedek yoksa ve sync açıksa diğer cihazlarınızın henüz sync olmamış hali kurtarma için şans olabilir, ancak bu genellikle güvenilmez. Bu nedenle her zaman HTML yedek önerilir.
+Önceden HTML yedek aldıysanız `chrome://bookmarks` üzerinden o yedeği içe aktarabilirsiniz. Yedek yoksa ve sync açıksa diğer cihazlarınızın henüz sync olmamış hali kurtarma için şans olabilir, ancak bu genellikle güvenilmez. Bu nedenle her zaman HTML yedek önerilir.
 
-**Soru: Script hiçbir şey yazmıyor, sessiz kalıyor. Ne oldu?**
+</details>
 
-Cevap: Console filtresinin "Info" seviyesi kapalı olabilir. Console üstündeki Default levels dropdown'ını açıp Info'nun işaretli olduğundan emin olun. Bir diğer sebep: `chrome://bookmarks` değil başka bir sekmede çalıştırıyor olabilirsiniz, Chrome Bookmarks API sadece o sayfada erişilebilir.
+<details>
+<summary>Script hiçbir şey yazmıyor, sessiz kalıyor. Ne oldu?</summary>
 
-**Soru: "copy is not defined" hatası alıyorum.**
+Console filtresinin "Info" seviyesi kapalı olabilir. Console üstündeki Default levels dropdown'ını açıp Info'nun işaretli olduğundan emin olun. Bir diğer sebep: `chrome://bookmarks` değil başka bir sekmede çalıştırıyor olabilirsiniz, Chrome Bookmarks API sadece o sayfada erişilebilir.
 
-Cevap: `copy()` DevTools'un built-in fonksiyonudur ama sadece top-level Console REPL'de tanımlıdır, async callback içinde değil. Bu toolkit'teki scriptler `copy()` kullanmaz. Kendi eklemelerinizde kullanıyorsanız değişkeni önce `window.__data = ...` ile kaydedip ayrı bir komutla `copy(JSON.stringify(window.__data))` çağırın.
+</details>
 
-**Soru: 2000+ yer imim var, script ne kadar sürer?**
+<details>
+<summary>"copy is not defined" hatası alıyorum.</summary>
 
-Cevap: API çağrıları sıralı async olduğu için büyük ağaçlar birkaç dakika sürebilir. Her script Console'da ilerleme bilgisi yazar. `02-dedupe-folders-and-urls.js` ve `07-consolidate-brand.js` en yoğun çalışan scriptlerdir.
+`copy()` DevTools'un built-in fonksiyonudur ama sadece top-level Console REPL'de tanımlıdır, async callback içinde değil. Bu toolkit'teki scriptler `copy()` kullanmaz. Kendi eklemelerinizde kullanıyorsanız değişkeni önce `window.__data = ...` ile kaydedip ayrı bir komutla `copy(JSON.stringify(window.__data))` çağırın.
 
-**Soru: Scripti çalıştırdım ama sıralama hala bozuk görünüyor.**
+</details>
 
-Cevap: Chrome yer imleri yöneticisi arayüzü bazen güncellenmiş sırayı yenilemeden gösterir. Sayfayı yenileyin (`F5`) veya yer imleri yöneticisi sekmesini kapatıp yeniden açın.
+<details>
+<summary>2000+ yer imim var, script ne kadar sürer?</summary>
 
-**Soru: Gmail hesaplarımdan sadece birini tutmak istiyorum, 04-subfolder-by-hostname nasıl yardımcı olur?**
+API çağrıları sıralı async olduğu için büyük ağaçlar birkaç dakika sürebilir. Her script Console'da ilerleme bilgisi yazar. `02-dedupe-folders-and-urls.js` ve `07-consolidate-brand.js` en yoğun çalışan scriptlerdir.
 
-Cevap: Bu script silme yapmaz, sadece tekrarlı URL'leri alt klasöre gruplar. Silme için `02-dedupe-folders-and-urls.js` URL'leri normalize ederek dedup eder, ancak farklı Gmail hesapları farklı path'lere sahip olduğu için (örneğin `/mail/u/0`, `/mail/u/1`) dedup edilmezler. Her biri geçerli ayrı bir yer imidir.
+</details>
 
-**Soru: Kurumsal Chrome politikası altındayım, script çalışır mı?**
+<details>
+<summary>Scripti çalıştırdım ama sıralama hala bozuk görünüyor.</summary>
 
-Cevap: Chrome Enterprise bazı organizasyonlarda DevTools'u veya yer imi düzenlemeyi kısıtlayabilir. Bu toolkit Chrome Bookmarks API üzerinden çalıştığı için organizasyon tarafında API engeli varsa script çalışmaz. Önce kendi kullanıcı profilinizde test edin.
+Chrome yer imleri yöneticisi arayüzü bazen güncellenmiş sırayı yenilemeden gösterir. Sayfayı yenileyin (`F5`) veya yer imleri yöneticisi sekmesini kapatıp yeniden açın.
+
+</details>
+
+<details>
+<summary>Gmail hesaplarımdan sadece birini tutmak istiyorum, 04-subfolder-by-hostname nasıl yardımcı olur?</summary>
+
+Bu script silme yapmaz, sadece tekrarlı URL'leri alt klasöre gruplar. Silme için `02-dedupe-folders-and-urls.js` URL'leri normalize ederek dedup eder, ancak farklı Gmail hesapları farklı path'lere sahip olduğu için (örneğin `/mail/u/0`, `/mail/u/1`) dedup edilmezler. Her biri geçerli ayrı bir yer imidir.
+
+</details>
+
+<details>
+<summary>Kurumsal Chrome politikası altındayım, script çalışır mı?</summary>
+
+Chrome Enterprise bazı organizasyonlarda DevTools'u veya yer imi düzenlemeyi kısıtlayabilir. Bu toolkit Chrome Bookmarks API üzerinden çalıştığı için organizasyon tarafında API engeli varsa script çalışmaz. Önce kendi kullanıcı profilinizde test edin.
+
+</details>
 
 ## Bilinen Kısıtlar
 
