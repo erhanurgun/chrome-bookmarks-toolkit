@@ -25,124 +25,161 @@
   const TRACKING_PARAMS = /^(utm_.*|fbclid|gclid|mc_cid|mc_eid|ref|ref_src|ref_url|igshid|yclid|dclid|msclkid)$/i;
   // ================================
 
-  const api = {
-    getTree: () => new Promise(r => chrome.bookmarks.getTree(r)),
-    getChildren: (id) => new Promise(r => chrome.bookmarks.getChildren(id, r)),
-    move: (id, dest) => new Promise((ok, fail) => chrome.bookmarks.move(id, dest, (n) => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok(n);
+  // ======== CONSTANTS ========
+  // Merge raporunda gösterilecek en büyük N grup.
+  const MERGE_LOG_HEAD = 30;
+  const DEFAULT_PORTS = { 'http:': '80', 'https:': '443' };
+  // ================================
+
+  // ======== HELPERS ========
+  const makeLogger = (prefix) => ({
+    log: (...args) => console.log(`[${prefix}]`, ...args),
+    warn: (...args) => console.warn(`[${prefix}]`, ...args),
+    error: (...args) => console.error(`[${prefix}]`, ...args),
+  });
+
+  const makeApi = () => ({
+    getTree: () => new Promise((resolve) => chrome.bookmarks.getTree(resolve)),
+    getChildren: (id) => new Promise((resolve) => chrome.bookmarks.getChildren(id, resolve)),
+    move: (id, dest) => new Promise((resolve, reject) => chrome.bookmarks.move(id, dest, (node) => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve(node);
     })),
-    remove: (id) => new Promise((ok, fail) => chrome.bookmarks.remove(id, () => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok();
+    remove: (id) => new Promise((resolve, reject) => chrome.bookmarks.remove(id, () => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve();
     })),
-    removeTree: (id) => new Promise((ok, fail) => chrome.bookmarks.removeTree(id, () => {
-      if (chrome.runtime.lastError) fail(chrome.runtime.lastError); else ok();
+    removeTree: (id) => new Promise((resolve, reject) => chrome.bookmarks.removeTree(id, () => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve();
     })),
+  });
+
+  const findBar = async (api, barTitles) => {
+    const tree = await api.getTree();
+    return tree[0].children.find((c) => c.id === '1' || barTitles.includes(c.title)) || null;
   };
-  const log = (...a) => console.log('[dedupe]', ...a);
-  const warn = (...a) => console.warn('[dedupe]', ...a);
 
   // URL normalize: aynı adresin farklı yazımlarını eşitler.
-  const normalizeUrl = (url) => {
+  // http/https dışı şemalar dokunulmadan döner (chrome://, javascript: vb.).
+  const normalizeUrl = (url, trackingRegex) => {
     try {
       const u = new URL(url);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return url;
       let host = u.hostname.toLowerCase();
       if (host.startsWith('www.')) host = host.slice(4);
-      const defaultPorts = { 'http:': '80', 'https:': '443' };
-      const port = u.port === defaultPorts[u.protocol] ? '' : (u.port ? ':' + u.port : '');
+      const port = u.port === DEFAULT_PORTS[u.protocol] ? '' : (u.port ? ':' + u.port : '');
       let path = u.pathname || '';
       if (path.endsWith('/') && path.length > 1) path = path.slice(0, -1);
       const params = new URLSearchParams(u.search);
       const kept = [];
-      for (const [k, v] of params) if (!TRACKING_PARAMS.test(k)) kept.push([k, v]);
+      for (const [k, v] of params) if (!trackingRegex.test(k)) kept.push([k, v]);
       kept.sort((a, b) => a[0].localeCompare(b[0]));
       const query = kept.length
         ? '?' + kept.map(([k, v]) => v === '' ? encodeURIComponent(k) : encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&')
         : '';
       let frag = u.hash || '';
+      // SPA fragment'i (örn. #/path, #?k=v) korunur; boş anchor atılır.
       if (frag && !frag.includes('/') && !frag.includes('?') && !frag.includes('=')) frag = '';
       return u.protocol + '//' + host + port + path + query + frag;
     } catch { return url; }
   };
 
-  const tree = await api.getTree();
-  const bar = tree[0].children.find(c => c.id === '1' || BAR_TITLES.includes(c.title));
-  if (!bar) { console.error('[dedupe] Yer imleri çubuğu bulunamadı'); return; }
-
-  let foldersMerged = 0, foldersRemoved = 0, urlsRemoved = 0, errors = 0;
-  const mergeLog = [];
-
-  const dedupeFolder = async (folderId, path) => {
-    let kids = await api.getChildren(folderId);
-
-    // 1) Aynı isimde alt klasörleri grupla
+  // Aynı parent altında aynı isimdeki folder'ları birleştirir.
+  // Grubun ilki korunur, diğerlerinin içeriği oraya taşınır, boş kalan silinir.
+  const mergeDuplicateFolders = async (folderId, path, ctx) => {
+    const kids = await ctx.api.getChildren(folderId);
     const folderGroups = new Map();
     for (const k of kids) {
-      if (!k.url) {
-        if (!folderGroups.has(k.title)) folderGroups.set(k.title, []);
-        folderGroups.get(k.title).push(k);
-      }
+      if (k.url) continue;
+      if (!folderGroups.has(k.title)) folderGroups.set(k.title, []);
+      folderGroups.get(k.title).push(k);
     }
 
-    // Birleştir: grup[0] korunur, diğerlerinin içeriği oraya taşınır.
     for (const [name, group] of folderGroups) {
       if (group.length <= 1) continue;
-      foldersMerged++;
-      foldersRemoved += group.length - 1;
-      mergeLog.push({ path: path ? path + '/' + name : name, count: group.length });
-      if (DRY_RUN) continue;
+      ctx.counters.foldersMerged++;
+      ctx.counters.foldersRemoved += group.length - 1;
+      ctx.mergeLog.push({ path: path ? path + '/' + name : name, count: group.length });
+      if (ctx.dryRun) continue;
 
       const keep = group[0];
       for (let i = 1; i < group.length; i++) {
         const dup = group[i];
         try {
-          const dupKids = await api.getChildren(dup.id);
+          const dupKids = await ctx.api.getChildren(dup.id);
           for (const dk of dupKids) {
-            try { await api.move(dk.id, { parentId: keep.id }); }
-            catch (e) { errors++; warn('move fail:', dk.title, e); }
+            try { await ctx.api.move(dk.id, { parentId: keep.id }); }
+            catch (e) { ctx.counters.errors++; ctx.warn('move fail:', dk.title, e); }
           }
-          await api.removeTree(dup.id);
-        } catch (e) { warn('merge fail:', name, e); errors++; }
+          await ctx.api.removeTree(dup.id);
+        } catch (e) { ctx.warn('merge fail:', name, e); ctx.counters.errors++; }
       }
     }
+  };
 
-    // 2) Güncel children (klasör birleştirmesi sonrası değişmiş olabilir)
-    kids = await api.getChildren(folderId);
-
-    // 3) Aynı klasör içinde duplicate URL'leri dedup et (ilk korunur).
+  // Aynı klasör içinde normalize-eşit URL'leri dedup eder (ilki korunur).
+  const dedupeFolderUrls = async (folderId, ctx) => {
+    const kids = await ctx.api.getChildren(folderId);
     const seen = new Map();
     for (const k of kids) {
       if (!k.url) continue;
-      const nu = normalizeUrl(k.url);
+      const nu = normalizeUrl(k.url, ctx.trackingRegex);
       if (seen.has(nu)) {
-        urlsRemoved++;
-        if (!DRY_RUN) {
-          try { await api.remove(k.id); }
-          catch (e) { errors++; warn('remove fail:', k.url, e); }
+        ctx.counters.urlsRemoved++;
+        if (!ctx.dryRun) {
+          try { await ctx.api.remove(k.id); }
+          catch (e) { ctx.counters.errors++; ctx.warn('remove fail:', k.url, e); }
         }
       } else {
         seen.set(nu, k);
       }
     }
+  };
 
-    // 4) Rekursif iniş
-    const finalKids = await api.getChildren(folderId);
+  // Rekursif tarama: önce folder merge, sonra URL dedup, sonra alt klasörlere iniş.
+  // Sıra önemli: merge sonrası klasör listesi değişmiş olabilir, yeniden okunur.
+  const traverseAndDedupe = async (folderId, path, ctx) => {
+    await mergeDuplicateFolders(folderId, path, ctx);
+    await dedupeFolderUrls(folderId, ctx);
+    const finalKids = await ctx.api.getChildren(folderId);
     for (const k of finalKids) {
-      if (!k.url) await dedupeFolder(k.id, path ? path + '/' + k.title : k.title);
+      if (k.url) continue;
+      const childPath = path ? path + '/' + k.title : k.title;
+      await traverseAndDedupe(k.id, childPath, ctx);
     }
+  };
+
+  const formatMergeReport = (mergeLog, head, log) => {
+    log('');
+    log(`======== FOLDER MERGE DETAYI (ilk ${head}) ========`);
+    mergeLog.sort((a, b) => b.count - a.count);
+    for (const m of mergeLog.slice(0, head)) log(`  ${String(m.count).padStart(3)}x  ${m.path}`);
+    if (mergeLog.length > head) log(`  ... ve ${mergeLog.length - head} daha`);
+  };
+
+  // ======== MAIN ========
+  const { log, warn } = makeLogger('dedupe');
+  const api = makeApi();
+
+  const bar = await findBar(api, BAR_TITLES);
+  if (!bar) { console.error('[dedupe] Yer imleri çubuğu bulunamadı'); return; }
+
+  const ctx = {
+    api,
+    warn,
+    dryRun: DRY_RUN,
+    trackingRegex: TRACKING_PARAMS,
+    mergeLog: [],
+    counters: { foldersMerged: 0, foldersRemoved: 0, urlsRemoved: 0, errors: 0 },
   };
 
   log(`Başlıyor (DRY_RUN=${DRY_RUN})...`);
   const t0 = performance.now();
-  await dedupeFolder(bar.id, '');
+  await traverseAndDedupe(bar.id, '', ctx);
   const dt = ((performance.now() - t0) / 1000).toFixed(1);
 
-  log('');
-  log('======== FOLDER MERGE DETAYI (ilk 30) ========');
-  mergeLog.sort((a, b) => b.count - a.count);
-  for (const m of mergeLog.slice(0, 30)) log(`  ${String(m.count).padStart(3)}x  ${m.path}`);
-  if (mergeLog.length > 30) log(`  ... ve ${mergeLog.length - 30} daha`);
+  formatMergeReport(ctx.mergeLog, MERGE_LOG_HEAD, log);
 
+  // ======== SUMMARY ========
+  const { foldersMerged, foldersRemoved, urlsRemoved, errors } = ctx.counters;
   log('');
   log('======== ÖZET ========');
   log(`Birleştirilen klasör grubu: ${foldersMerged}`);
